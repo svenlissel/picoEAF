@@ -224,11 +224,13 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
     else if(3==type) /* set parameter commands */
     {
         /* print input parameter buffer */
+    #if 0
         DBG_PRINTF("[EAF] RX Report: ");
         for (uint8_t i = 0; i < 12; i++) {
             DBG_PRINTF("%02X ", params[i]);
         }
         DBG_PRINTF("\r\n");
+    #endif
 
         // Parse SET_SETTINGS request (12 bytes)
         EAF_SetSettingsRequest* pSettings = (EAF_SetSettingsRequest*)params;
@@ -289,11 +291,15 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 break;
                 
             default:
-                DBG_PRINTF("[EAF] WARNING: Unknown type%d, cmd %d\r\n", type, cmd);
+                DBG_PRINTF("[EAF] WARNING: Unknown set Parameter type%d, cmd %d\r\n", type, cmd);
                 // Unknown command - return response header only
                 break;
         }
 
+    }
+    else
+    {
+        DBG_PRINTF("[EAF] WARNING: Unknowntype command type%d, cmd %d\r\n", type, cmd);
     }
 
 

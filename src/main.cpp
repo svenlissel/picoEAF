@@ -53,8 +53,6 @@ static void taskBlink(void *pvParameters)
 static void taskHeartbeat(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t tick = 0;
-    uint8_t report_data[15];  // 15 bytes data (report ID is added by usb_hid_send_report)
 
     // Wait until the USB host enumerates us
     while (!usb_hid_is_mounted())

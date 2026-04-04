@@ -9,6 +9,13 @@
 // Handles all TinyUSB HID device functionality and callbacks
 // ---------------------------------------------------------------------------
 
+typedef struct {
+	uint8_t report_id;
+	uint8_t report_type;
+	uint16_t buflen;
+	uint8_t data[16];  // Raw TinyUSB callback payload bytes (unmodified)
+} usb_hid_rx_message_t;
+
 // Initialize USB HID device
 // Must be called during setup() before creating tasks
 void usb_hid_init(void);
@@ -26,8 +33,7 @@ QueueHandle_t usb_hid_get_rx_queue(void);
 // Buffer format: [byte0=report_id][bytes1-15=data]
 uint8_t *usb_hid_get_rx_buffer(void);
 
-// Get the report ID of the last received report
-uint8_t usb_hid_get_rx_report_id(void);
-
 // Check if USB device is mounted by the host
 bool usb_hid_is_mounted(void);
+
+bool usb_hid_set_report_answere(const uint8_t *data, uint16_t len);

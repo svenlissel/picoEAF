@@ -2,6 +2,8 @@
 #include "usb_descriptors.h"
 #include <Adafruit_TinyUSB.h>
 #include <string.h>
+#include "debug.h"
+#include "eaf.h"
 
 // ---------------------------------------------------------------------------
 // Custom HID Report Descriptor (ZWO EAF - 68 bytes)
@@ -60,51 +62,94 @@ const uint8_t HID_REPORT_DESCRIPTOR[] = {
 // ZWO EAF format: 16 bytes per report (1 byte report ID + 15 bytes data)
 // ---------------------------------------------------------------------------
 static Adafruit_USBD_HID usb_hid;
-static uint8_t hid_tx_buffer[16];  // 1 byte Report ID + 15 bytes data
-static uint8_t hid_rx_buffer[16];  // 1 byte Report ID + 15 bytes data
-static uint8_t hid_rx_report_id = 0;  // Track which report ID was received
 static QueueHandle_t hid_rx_queue = NULL;
+static uint8_t hid_get_report_data[16] = {0};
+static uint16_t hid_get_report_len = 0;
 
 // ---------------------------------------------------------------------------
-// TinyUSB HID Callbacks (weak, can be overridden by user)
+// Adafruit TinyUSB HID callbacks
 // ---------------------------------------------------------------------------
 
-// HID Output Report Callback (Host → Device)
-__weak uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id,
+// HID Get Report Callback (Host <- Device)
+static uint16_t usb_hid_get_report_cb(uint8_t report_id,
                                       hid_report_type_t report_type,
                                       uint8_t* buffer, uint16_t reqlen)
 {
-    // Not used for OUT reports; we handle those in set_report_cb
-    (void)itf;
     (void)report_id;
     (void)report_type;
-    (void)buffer;
-    return 0;
+
+    if (buffer == NULL || reqlen == 0) {
+        return 0;
+    }
+
+    uint16_t out_len = (reqlen < hid_get_report_len) ? reqlen : hid_get_report_len;
+    if (out_len > 0) {
+        memcpy(buffer, hid_get_report_data, out_len);
+    }
+    return out_len;
 }
 
-// HID Set Report Callback (Host → Device data arrival)
-__weak void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id,
+// HID Set Report Callback (Host -> Device data arrival)
+static void usb_hid_set_report_cb(uint8_t report_id,
                                   hid_report_type_t report_type,
                                   uint8_t const* buffer, uint16_t buflen)
 {
-    // Store the report ID
-    hid_rx_report_id = report_id;
+    uint8_t anwereSize;
+    uint8_t answereBuf[16];
+    DBG_PRINTF("HID RX packet: report_id=%u, report_type=%u, buflen=%u\r\n",
+                report_id,
+                report_type,
+                (unsigned)buflen);
+    
+#if 0
+    // Build full EAF packet expected by EAF_HID_ReportReceived().
+    // rx_msg.data is raw TinyUSB payload without report ID.
+    memset(eaf_packet, 0, sizeof(eaf_packet));
+    eaf_packet[0] = rx_msg.report_id;
+    uint16_t payload_len = (rx_msg.buflen < 15u) ? rx_msg.buflen : 15u;
+    memcpy(&eaf_packet[1], rx_msg.data, payload_len);
+    // Process EAF command in place (fills response packet)
+    EAF_HID_ReportReceived(eaf_packet, sizeof(eaf_packet));
+#endif
 
-    // Store the received data in our RX buffer (max 16 bytes including report ID)
-    // Note: buffer is the data without report ID; we prepend it
-    hid_rx_buffer[0] = report_id;
-    uint16_t len = (buflen < (sizeof(hid_rx_buffer) - 1)) ? buflen : (sizeof(hid_rx_buffer) - 1);
-    memcpy(hid_rx_buffer + 1, buffer, len);
+    anwereSize = EAF_parse_report(report_id, report_type, buffer, buflen, answereBuf);
 
-    // Signal the HID RX task via queue
-    if (hid_rx_queue != NULL)
-    {
-        uint8_t msg = report_id;  // Pass the report ID itself
-        xQueueSendFromISR(hid_rx_queue, &msg, NULL);
+    // prepare response payload (bytes 1..15). Report ID is provided separately.
+    usb_hid_set_report_answere(answereBuf, anwereSize);
+}
+bool usb_hid_set_report_answere(const uint8_t *data, uint16_t len)
+{
+    if (data == NULL) {
+        return false;
     }
 
-    (void)itf;
-    (void)report_type;
+    hid_get_report_len = (len < sizeof(hid_get_report_data)) ? len : sizeof(hid_get_report_data);
+    memcpy(hid_get_report_data, data, hid_get_report_len);
+    return true;
+}
+
+bool usb_hid_send_report(uint8_t report_id, const uint8_t *data, uint16_t len)
+{
+    if (TinyUSBDevice.mounted()) {
+        DBG_PRINTF("usb_hid_send_report: report_id=%u buflen=%u ",
+            (unsigned)report_id,
+            (unsigned)len);
+        for (uint16_t i = 0; i < len; i++) {
+            DBG_PRINTF("%02X ", data[i]);
+        }
+        DBG_PRINT("\r\n");
+
+        // Keep last sent payload available for GET_REPORT requests.
+        usb_hid_set_report_answere(data, len);
+
+        usb_hid.sendReport(report_id, data, len);
+        
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +169,7 @@ __weak void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id,
 void usb_hid_init(void)
 {
     // Create RX queue early (before callbacks can fire)
-    hid_rx_queue = xQueueCreate(4, sizeof(uint8_t));
+    hid_rx_queue = xQueueCreate(4, sizeof(usb_hid_rx_message_t));
     configASSERT(hid_rx_queue != NULL);
 
     // Start the USB stack
@@ -140,6 +185,7 @@ void usb_hid_init(void)
     usb_hid.setPollInterval(2);   // Poll every 2 ms
     usb_hid.setReportDescriptor(HID_REPORT_DESCRIPTOR, sizeof(HID_REPORT_DESCRIPTOR));
     usb_hid.setStringDescriptor(USBD_INTERFACE_STR);
+    usb_hid.setReportCallback(usb_hid_get_report_cb, usb_hid_set_report_cb);
     usb_hid.begin();
 
     // If already enumerated, additional class driverr begin() e.g msc, hid won't take effect until re-enumeration
@@ -153,48 +199,12 @@ void usb_hid_init(void)
     delay(100);
 }
 
-bool usb_hid_send_report(uint8_t report_id, const uint8_t *data, uint16_t len)
-{
-    if (!TinyUSBDevice.mounted())
-        return false;
-
-    // Validate report ID (1-4 for ZWO EAF)
-    if (report_id < 1 || report_id > 4)
-        return false;
-
-    // Prepare TX buffer with report ID and data
-    hid_tx_buffer[0] = report_id;
-    uint16_t copy_len = (len < (sizeof(hid_tx_buffer) - 1)) ? len : (sizeof(hid_tx_buffer) - 1);
-    if (data != NULL && copy_len > 0)
-    {
-        memcpy(hid_tx_buffer + 1, data, copy_len);
-    }
-
-    // Pad with zeros if needed
-    if (copy_len < (sizeof(hid_tx_buffer) - 1))
-    {
-        memset(hid_tx_buffer + 1 + copy_len, 0, sizeof(hid_tx_buffer) - 1 - copy_len);
-    }
-
-    // Send the HID report (first byte is report ID)
-    usb_hid.sendReport(report_id, hid_tx_buffer, sizeof(hid_tx_buffer));
-    return true;
-}
-
 QueueHandle_t usb_hid_get_rx_queue(void)
 {
     return hid_rx_queue;
 }
 
-uint8_t *usb_hid_get_rx_buffer(void)
-{
-    return hid_rx_buffer;
-}
 
-uint8_t usb_hid_get_rx_report_id(void)
-{
-    return hid_rx_report_id;
-}
 
 bool usb_hid_is_mounted(void)
 {

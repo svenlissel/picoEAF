@@ -24,10 +24,3 @@
   #define DBG_PRINTF(fmt,...) do {} while (0)
 #endif
 
-// Helper: print task name and tick count
-static inline void dbg_task_header(const char *task_name)
-{
-    #if DEBUG_ENABLED
-    Serial.printf("[%8lu] [%s] ", (unsigned long)xTaskGetTickCount(), task_name);
-    #endif
-}

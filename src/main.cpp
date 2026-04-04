@@ -8,14 +8,13 @@
 
 // USB HID interface
 #include "usb_hid.h"
-
-// Debug output (UART0)
 #include "debug.h"
+#include "eaf.h"
 
 // ---------------------------------------------------------------------------
 // FreeRTOS task queue for inter-task communication
 // ---------------------------------------------------------------------------
-static QueueHandle_t xMsgQueue;
+
 
 // ---------------------------------------------------------------------------
 // Task: blink the on-board LED (heartbeat indicator)
@@ -69,48 +68,6 @@ static void taskHeartbeat(void *pvParameters)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Task: receive and echo HID reports from the host
-// Receives from Report IDs 3-4 (Output), echoes back on Report IDs 1-2 (Input)
-// ---------------------------------------------------------------------------
-static void taskHidRx(void *pvParameters)
-{
-    (void)pvParameters;
-    uint8_t report_id;
-    uint8_t echo_data[15];  // 15 bytes data (without report ID)
-
-    // Get the HID RX queue from the USB HID module
-    QueueHandle_t rx_queue = usb_hid_get_rx_queue();
-
-    for (;;)
-    {
-        // Wait for data from the HID RX callback (receives report ID via queue)
-        if (xQueueReceive(rx_queue, &report_id, pdMS_TO_TICKS(100)) == pdTRUE)
-        {
-            // Get the received data (includes report ID at byte 0)
-            uint8_t *rx_buffer = usb_hid_get_rx_buffer();
-
-            // Echo back on corresponding Input report ID
-            // Input: 1-2, Output: 3-4 -> map 3->1, 4->2
-            uint8_t tx_report_id = (report_id <= 2) ? report_id : (report_id - 2);
-
-            // Copy the data (skip the report ID byte at position 0)
-            memcpy(echo_data, rx_buffer + 1, sizeof(echo_data));
-
-            // Add an echo marker at the end
-            echo_data[14] = 0xAA;
-
-            // Send it back with the corresponding input report ID
-            if (usb_hid_is_mounted())
-            {
-                usb_hid_send_report(tx_report_id, echo_data, sizeof(echo_data));
-            }
-
-            // Signal that we got data
-            xQueueSend(xMsgQueue, &report_id, 0);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // setup() – runs once on core 0 inside the FreeRTOS idle task context
@@ -127,19 +84,18 @@ void setup()
     DBG_PRINTLN("Initializing USB HID device...");
     usb_hid_init();
 
-    // Create the message queue for inter-task signaling
-    xMsgQueue = xQueueCreate(10, sizeof(uint8_t));
-    configASSERT(xMsgQueue != NULL);
 
     // Spawn FreeRTOS tasks
     xTaskCreate(taskBlink,     "Blink",     256,  NULL, 1, NULL);
     xTaskCreate(taskHeartbeat, "Heartbeat", 512,  NULL, 1, NULL);
-    xTaskCreate(taskHidRx,     "HidRx",     512,  NULL, 2, NULL);
 
     DBG_PRINT("Device ready - waiting for USB host...\n");
 
     // Note: do NOT call vTaskStartScheduler() – the earlephilhower core
     // starts the FreeRTOS SMP scheduler automatically before setup() runs.
+
+
+    EAF_Init();
 }
 
 // ---------------------------------------------------------------------------

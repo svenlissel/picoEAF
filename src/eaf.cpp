@@ -8,11 +8,13 @@
 #include "eaf.h"
 #include <string.h>
 #include "debug.h"
+#include "storage.h"
 
 
 /* Private variables */
 static EAF_HandleTypeDef heaf = {0};
 static uint8_t hid_responseBuffer[16];
+static constexpr uint8_t EAF_STORAGE_VERSION = 1;
 
 
 /* Optional stepper backend.
@@ -56,24 +58,69 @@ static void Stepper_Beep(Stepper_Handle_t* motor, uint16_t duration_ms, uint16_t
 /* Private function prototypes */
 static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, const uint8_t* params, uint8_t* response);
 
+uint8_t EAF_SaveSettings(void)
+{
+    EAF_StorageTypeDef persisted = {0};
+    uint8_t raw[STORAGE_DATA_LEN] = {0};
+
+    persisted.version = EAF_STORAGE_VERSION;
+    persisted.current_position = heaf.current_position;
+    persisted.max_position = heaf.max_position;
+    persisted.backlash = heaf.backlash;
+    persisted.beep_enabled = heaf.beep_enabled;
+    persisted.reverse_enabled = heaf.reverse_enabled;
+    memcpy(persisted.serial_number, heaf.serial_number, sizeof(persisted.serial_number));
+
+    memcpy(raw, &persisted, sizeof(persisted));
+    if (!storage_save(raw)) {
+        DBG_PRINTLN("EAF storage unchanged");
+        return 0;
+    }
+    else
+    {
+        DBG_PRINTLN("EAF storage saved");
+    }
+
+    return 1;
+}
+
 /**
  * @brief Initialize EAF HID Device
  */
 void EAF_Init(void)
 {
-    heaf.current_position = 3333;
-    heaf.target_position = 6666;
+    heaf.current_position = 0;
+    heaf.target_position = heaf.current_position ;
     heaf.max_position = 60000;
-    heaf.backlash = 222;  // 0xD3 from PCAP
-    heaf.status = 0x00;  // Idle
+    heaf.backlash = 222;
     heaf.beep_enabled = 0;
-    heaf.reverse_enabled = 1;
-    heaf.step_speed = 100;
+    heaf.reverse_enabled = 0;
     heaf.temperature = 2500;
-    
+
     // dummy Serial number
     uint8_t serial[8] = {0x61, 0x00, 0x20, 0x67, 0xEA, 0x3C, 0x66, 0x26};
     memcpy(heaf.serial_number, serial, 8);
+
+    // Load persisted settings/state from storage if valid.
+    uint8_t raw[STORAGE_DATA_LEN] = {0};
+    if (storage_init() && storage_load(raw)) {
+        EAF_StorageTypeDef persisted = {0};
+        memcpy(&persisted, raw, sizeof(EAF_StorageTypeDef));
+
+        if (persisted.version == EAF_STORAGE_VERSION) {
+            heaf.current_position = persisted.current_position;
+            heaf.target_position = persisted.current_position;
+            heaf.max_position = persisted.max_position;
+            heaf.backlash = persisted.backlash;
+            heaf.beep_enabled = persisted.beep_enabled;
+            heaf.reverse_enabled = persisted.reverse_enabled;
+            memcpy(heaf.serial_number, persisted.serial_number, sizeof(heaf.serial_number));
+            DBG_PRINTLN("EAF storage loaded");
+        } else {
+            EAF_SaveSettings();
+            DBG_PRINTLN("EAF storage initialized");
+        }
+    }
 }
 
 /**
@@ -199,13 +246,24 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
 
         case EAF_CMD_UNKNOWN_0D:
             DBG_PRINTF("[EAF] UNKNOWN_0D type%d cmd%d: Returning zeros\r\n", type, cmd);
+            DBG_PRINTF("[EAF] RX Report: ");
+            for (uint8_t i = 0; i < 12; i++) {
+                DBG_PRINTF("%02X ", params[i]);
+            }
+            DBG_PRINTF("\r\n");
+            memcpy(pResponseParam, "ETESTN", 8);
             // Response: All zeros (already cleared)
             break;
             
         case EAF_CMD_UNKNOWN_1F:
             DBG_PRINTF("[EAF] UNKNOWN_1F type%d cmd%d: Returning 0x01\r\n", type, cmd);
+            DBG_PRINTF("[EAF] RX Report: ");
+            for (uint8_t i = 0; i < 12; i++) {
+                DBG_PRINTF("%02X ", params[i]);
+            }
+            DBG_PRINTF("\r\n");
             // Response: 0x01
-            response[5] = 0x01;
+            pResponseParam[0] = 0x01;
             break;
 
         default:
@@ -283,6 +341,8 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                     {
                         heaf.current_position = targetPosition;
                     }
+
+                    EAF_SaveSettings();
                 }
                 else 
                 {

@@ -102,9 +102,26 @@ typedef struct {
     uint8_t status;             // 0x00=idle, 0x01=moving
     uint8_t beep_enabled;       // 0=off, 1=on
     uint8_t reverse_enabled;    // 0=off, 1=on
-    uint8_t step_speed;
     uint8_t serial_number[8];   // 8-byte serial number
 } EAF_HandleTypeDef;
+
+/* warning, never change this values! */
+typedef struct __attribute__((packed)) {
+    uint8_t version; 
+    uint32_t current_position;  // 32-bit position (little-endian)
+    uint32_t max_position;
+    uint8_t backlash;
+    uint8_t beep_enabled;       // 0=off, 1=on
+    uint8_t reverse_enabled;    // 0=off, 1=on
+    uint8_t serial_number[8];   // 8-byte serial number
+    uint8_t reserved[12];
+} EAF_StorageTypeDef;
+
+#ifdef __cplusplus
+static_assert(sizeof(EAF_StorageTypeDef) == 32, "EAF_StorageTypeDef size must be 32 bytes");
+#else
+_Static_assert(sizeof(EAF_StorageTypeDef) == 32, "EAF_StorageTypeDef size must be 32 bytes");
+#endif
 
 /* Exported constants --------------------------------------------------------*/
 
@@ -129,6 +146,12 @@ void EAF_HID_ReportReceived(uint8_t* report, uint8_t len);
 
 
 uint8_t EAF_parse_report(uint8_t report_id, uint8_t report_type, uint8_t const* data, uint8_t len, uint8_t* answereBuf);
+
+/**
+ * @brief Persist current EAF settings/state to storage
+ * @retval 1 on success, 0 on error
+ */
+uint8_t EAF_SaveSettings(void);
 
 /**
  * @brief Update current position (call this in main loop)

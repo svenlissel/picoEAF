@@ -18,6 +18,7 @@
 static EAF_HandleTypeDef heaf = {0};
 static uint8_t hid_responseBuffer[16];
 static constexpr uint8_t EAF_STORAGE_VERSION = 1;
+static int8_t heaf_last_move_dir = 0;
 
 
 /* Optional stepper backend.
@@ -324,6 +325,23 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 if (heaf.reverse_enabled) {
                     delta_steps = -delta_steps;
                 }
+
+                int8_t move_dir = 0;
+                if (delta_steps > 0) {
+                    move_dir = 1;
+                } else if (delta_steps < 0) {
+                    move_dir = -1;
+                }
+
+                if (move_dir != 0 && heaf_last_move_dir != 0 && move_dir != heaf_last_move_dir && heaf.backlash > 0) {
+                    int32_t backlash_comp = (move_dir > 0) ? (int32_t)heaf.backlash : -(int32_t)heaf.backlash;
+                    delta_steps += backlash_comp;
+                    DBG_PRINTF("[EAF] Backlash compensation applied: %ld\r\n", (long)backlash_comp);
+                }
+
+                if (move_dir != 0) {
+                    heaf_last_move_dir = move_dir;
+                }
                 
                 // Move stepper motor
                 Stepper_MoveSteps(&stepper_motor, delta_steps);
@@ -420,5 +438,5 @@ void EAF_UpdatePosition(void)
 
 bool EAF_isMoving(void)
 {
-    return heaf.status = 0x01;  // Moving
+    return heaf.status;
 }

@@ -327,11 +327,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 
                 // Move stepper motor
                 Stepper_MoveSteps(&stepper_motor, delta_steps);
-                
-                // Optional: Beep on start if enabled
-                if (heaf.beep_enabled) {
-                    Stepper_Beep(&stepper_motor, 30, 2500);
-                }
+
                 break;
             }
 

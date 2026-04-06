@@ -1,6 +1,8 @@
 #include "stepper_TMC2209.h"
 
 #include <Arduino.h>
+#include <FreeRTOS.h>
+#include <task.h>
 
 #define STEP_PERIOD_MIN_TICKS 1U
 #define STEP_PULSE_NOPS 10
@@ -256,18 +258,19 @@ void Stepper_Beep(Stepper_Handle_t *handle, uint16_t duration_ms, uint16_t frequ
         half_period_us = 1;
     }
 
-    TMC2209_EnableMotor(handle, true);
+    uint32_t duration_us = static_cast<uint32_t>(duration_ms) * 1000UL;
+    uint32_t toggles = (duration_us + half_period_us - 1U) / half_period_us;
+    if (toggles == 0) {
+        toggles = 1;
+    }
 
-    uint32_t start = millis();
-    while ((millis() - start) < static_cast<uint32_t>(duration_ms)) {
-        digitalWrite(handle->config.step_pin, HIGH);
-        delayMicroseconds(half_period_us);
-
-        digitalWrite(handle->config.step_pin, LOW);
+    for (uint32_t i = 0; i < toggles; ++i) {
+        TMC2209_EnableMotor(handle, (i & 1U) ? true : false);
         delayMicroseconds(half_period_us);
     }
 
     digitalWrite(handle->config.step_pin, LOW);
+
     if (!handle->config.hold_when_idle) {
         TMC2209_EnableMotor(handle, false);
     }

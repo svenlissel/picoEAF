@@ -63,19 +63,17 @@ static void taskBlink(void *pvParameters)
 // ---------------------------------------------------------------------------
 // Task: periodically send heartbeat data via HID (Report ID 1 - Input)
 // ---------------------------------------------------------------------------
-static void taskHeartbeat(void *pvParameters)
+static void taskPositionSaver(void *pvParameters)
 {
     (void)pvParameters;
 
-    // Wait until the USB host enumerates us
-    while (!usb_hid_is_mounted())
-    {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
     for (;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(60*1000));
+        if(false == EAF_isMoving())
+        {
+            EAF_SaveSettings(true);
+        }
     }
 }
 
@@ -137,7 +135,7 @@ void setup()
 
     // Spawn FreeRTOS tasks
     xTaskCreate(taskBlink,     "Blink",     256,  NULL, 1, NULL);
-    xTaskCreate(taskHeartbeat, "Heartbeat", 512,  NULL, 1, NULL);
+    xTaskCreate(taskPositionSaver, "PositionSaver", 512,  NULL, 1, NULL);
     xTaskCreate(taskStepper,   "Stepper",   512,  NULL, 2, NULL);
 
     DBG_PRINT("Device ready - waiting for USB host...\n");

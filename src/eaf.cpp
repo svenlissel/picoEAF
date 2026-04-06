@@ -61,18 +61,34 @@ static void Stepper_Beep(Stepper_Handle_t* motor, uint16_t duration_ms, uint16_t
 /* Private function prototypes */
 static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, const uint8_t* params, uint8_t* response);
 
-uint8_t EAF_SaveSettings(void)
+uint8_t EAF_SaveSettings(bool withPosition)
 {
     EAF_StorageTypeDef persisted = {0};
     uint8_t raw[STORAGE_DATA_LEN] = {0};
 
+    if(true == withPosition)
+    {
+        persisted.current_position = heaf.current_position;
+    }
+    else
+    {
+        // Load persisted settings/state from storage if valid.
+        uint8_t raw[STORAGE_DATA_LEN] = {0};
+        if (storage_load(raw)) 
+        {
+            EAF_StorageTypeDef eepromPersisted = {0};
+            memcpy(&eepromPersisted, raw, sizeof(EAF_StorageTypeDef));
+            persisted.current_position = eepromPersisted.current_position;
+        }
+    }
+
     persisted.version = EAF_STORAGE_VERSION;
-    persisted.current_position = heaf.current_position;
     persisted.max_position = heaf.max_position;
     persisted.backlash = heaf.backlash;
     persisted.beep_enabled = heaf.beep_enabled;
     persisted.reverse_enabled = heaf.reverse_enabled;
     memcpy(persisted.serial_number, heaf.serial_number, sizeof(persisted.serial_number));
+    memcpy(persisted.custom_name, heaf.custom_name, sizeof(persisted.custom_name));
 
     memcpy(raw, &persisted, sizeof(persisted));
     if (!storage_save(raw)) {
@@ -92,6 +108,7 @@ uint8_t EAF_SaveSettings(void)
  */
 void EAF_Init(void)
 {
+    /* default values */
     heaf.current_position = 0;
     heaf.target_position = heaf.current_position ;
     heaf.max_position = 60000;
@@ -99,10 +116,10 @@ void EAF_Init(void)
     heaf.beep_enabled = 0;
     heaf.reverse_enabled = 0;
     heaf.temperature = 2500;
-
-    // dummy Serial number
     uint8_t serial[8] = {0x61, 0x00, 0x20, 0x67, 0xEA, 0x3C, 0x66, 0x26};
     memcpy(heaf.serial_number, serial, 8);
+    memcpy(heaf.custom_name, EAF_CUSTOM_NAME, sizeof(EAF_CUSTOM_NAME));
+
 
     // Load persisted settings/state from storage if valid.
     uint8_t raw[STORAGE_DATA_LEN] = {0};
@@ -118,9 +135,10 @@ void EAF_Init(void)
             heaf.beep_enabled = persisted.beep_enabled;
             heaf.reverse_enabled = persisted.reverse_enabled;
             memcpy(heaf.serial_number, persisted.serial_number, sizeof(heaf.serial_number));
+            memcpy(heaf.custom_name, persisted.custom_name, sizeof(heaf.custom_name));
             DBG_PRINTLN("EAF storage loaded");
         } else {
-            EAF_SaveSettings();
+            EAF_SaveSettings(true);
             DBG_PRINTLN("EAF storage initialized");
         }
     }
@@ -177,15 +195,13 @@ uint8_t EAF_parse_report(uint8_t report_id, uint8_t report_type, uint8_t const* 
  */
 static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params, uint8_t* response)
 {
-    uint8_t* pResponseParam;
+    uint8_t* pResponseParam =  &response[3];
+    memset(pResponseParam, 0, 12);      // Clear param bytes, maximum 12 bytes!
     
-    /* Initialize response header (report ID included by stack before) */
-    //response[0] = EAF_RESPONSE_MARKER;  // Response marker: 0x01
+    /* Initialize response header (report ID and Response marker (0x01) included by stack before) */
     response[0] = EAF_MAGIC_1;          // Magic: 0x7E ~
     response[1] = EAF_MAGIC_2;          // Magic: 0x5A Z
     response[2] = cmd;                  // Echo command
-    memset(&response[3], 0, 12);        // Clear param bytes
-    pResponseParam = &response[3];      //maximum 12 bytes!
 
     if(2==type) /* get parameter commands */
     {
@@ -229,7 +245,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                     .fw_major = EAF_FW_MAJOR,
                     .fw_minor = EAF_FW_MINOR,
                     .fw_patch = EAF_FW_PATCH,
-                    .device_name = "EEAFN"
+                    .device_name = EAF_DEVICE_NAME
                 };
             DBG_PRINTF("[EAF] -> GET_INFO type%d cmd%d: FW %d.%d.%d, Name: %s\r\n",
                         type, cmd, device_info.fw_major, device_info.fw_minor, device_info.fw_patch, device_info.device_name);
@@ -238,7 +254,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
         }
             
         case EAF_CMD_GET_SERIAL: //0x0C
-            DBG_PRINTF("[EAF] ->GET_SERIAL type%d cmd%d: ", type, cmd);
+            DBG_PRINTF("[EAF] -> GET_SERIAL type%d cmd%d: ", type, cmd);
             for (uint8_t i = 0; i < 8; i++) {
                 DBG_PRINTF("%02X", heaf.serial_number[i]);
             }
@@ -247,15 +263,9 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
             memcpy(pResponseParam, heaf.serial_number, 8);
             break;
 
-        case EAF_CMD_UNKNOWN_0D:
-            DBG_PRINTF("[EAF] UNKNOWN_0D type%d cmd%d: Returning zeros\r\n", type, cmd);
-            DBG_PRINTF("[EAF] RX Report: ");
-            for (uint8_t i = 0; i < 12; i++) {
-                DBG_PRINTF("%02X ", params[i]);
-            }
-            DBG_PRINTF("\r\n");
-            memcpy(pResponseParam, "ETESTN", 8);
-            // Response: All zeros (already cleared)
+        case EAF_CMD_CUSTOM_NAME:
+            DBG_PRINTF("[EAF] -> GET_CUSTOM_NAME type%d cmd%d, Custom: %s\r\n", type, cmd, heaf.custom_name);
+            memcpy(pResponseParam, heaf.custom_name, sizeof(heaf.custom_name));
             break;
             
         case EAF_CMD_UNKNOWN_1F:
@@ -270,7 +280,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
             break;
 
         default:
-            DBG_PRINTF("[EAF] WARNING: Unknown type%d, cmd %d\r\n", type, cmd);
+            DBG_PRINTF("[EAF] WARNING: Unknown get type%d, cmd %d\r\n", type, cmd);
             DBG_PRINTF("[EAF] RX Report: ");
             for (uint8_t i = 0; i < 12; i++) {
                 DBG_PRINTF("%02X ", params[i]);
@@ -284,15 +294,6 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
     }
     else if(3==type) /* set parameter commands */
     {
-        /* print input parameter buffer */
-    #if 0
-        DBG_PRINTF("[EAF] RX Report: ");
-        for (uint8_t i = 0; i < 12; i++) {
-            DBG_PRINTF("%02X ", params[i]);
-        }
-        DBG_PRINTF("\r\n");
-    #endif
-
         // Parse SET_SETTINGS request (12 bytes)
         EAF_SetSettingsRequest* pSettings = (EAF_SetSettingsRequest*)params;
         // Extract position (24-bit Big-Endian!)
@@ -306,7 +307,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
         uint16_t max_low = ((max_low_be & 0xFF) << 8) | ((max_low_be >> 8) & 0xFF);  // Convert to LE
         uint32_t max_steps = (max_high << 16) | max_low;
         
-        DBG_PRINTF("[EAF] SET_SETTINGS type%d, cmd %d: pos=%lu, backlash=%u, beep=%u, reverse=%u, max=%lu\r\n", 
+        DBG_PRINTF("[EAF] <- SET_SETTINGS type%d, cmd %d: pos=%lu, backlash=%u, beep=%u, reverse=%u, max=%lu\r\n", 
                     type, cmd, targetPosition, pSettings->backlash, beep, reverse, max_steps);
         switch (cmd) {
             case 0x01: { /* set target position and start motor */
@@ -348,7 +349,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                         heaf.current_position = targetPosition;
                     }
 
-                    EAF_SaveSettings();
+                    EAF_SaveSettings(false);
                 }
                 else 
                 {
@@ -359,14 +360,32 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 
             default:
                 DBG_PRINTF("[EAF] WARNING: Unknown set Parameter type%d, cmd %d\r\n", type, cmd);
+                DBG_PRINTF("[EAF] RX Report: ");
+                for (uint8_t i = 0; i < 12; i++) {
+                    DBG_PRINTF("%02X ", params[i]);
+                }
+                DBG_PRINTF("\r\n");
                 // Unknown command - return response header only
                 break;
         }
 
     }
+    else if(13==type) /* set custom name */
+    {
+        /* cmc already contains first character */
+        heaf.custom_name[0] = cmd;
+        memcpy(&heaf.custom_name[1], params, 7);
+        DBG_PRINTF("[EAF] <- SET_CUSTOM_NAME type%d: %s\r\n",type, heaf.custom_name);
+        EAF_SaveSettings(false);
+    }
     else
     {
         DBG_PRINTF("[EAF] WARNING: Unknowntype command type%d, cmd %d\r\n", type, cmd);
+        DBG_PRINTF("[EAF] RX Report: ");
+        for (uint8_t i = 0; i < 12; i++) {
+            DBG_PRINTF("%02X ", params[i]);
+        }
+        DBG_PRINTF("\r\n");
     }
 
 
@@ -401,4 +420,9 @@ void EAF_UpdatePosition(void)
         }
         heaf.status = 0x00;  // Idle
     }
+}
+
+bool EAF_isMoving(void)
+{
+    return heaf.status = 0x01;  // Moving
 }

@@ -31,7 +31,7 @@ extern "C" {
 #define EAF_CMD_GET_POSITION    0x03  // Get current position + status
 #define EAF_CMD_GET_INFO        0x04  // Get device info (FW version + name)
 #define EAF_CMD_GET_SERIAL      0x0C  // Get 8-byte serial number
-#define EAF_CMD_UNKNOWN_0D      0x0D  // Unknown (returns zeros)
+#define EAF_CMD_CUSTOM_NAME     0x0D  // Get custom Name
 #define EAF_CMD_GET_MAX_POS     0x10  // Get max position (uint32_t)
 #define EAF_CMD_GET_TEMP        0x12  // Get temperature (uint16_t, in 0.01°C)
 #define EAF_CMD_MOVE_REL        0x13  // Move relative (int32_t)
@@ -43,6 +43,10 @@ extern "C" {
 #define EAF_FW_MAJOR            3
 #define EAF_FW_MINOR            8
 #define EAF_FW_PATCH            1
+
+
+#define EAF_DEVICE_NAME "EEAFN"
+#define EAF_CUSTOM_NAME "picoEAF"
 
 
 /* Exported types ------------------------------------------------------------*/
@@ -103,6 +107,7 @@ typedef struct {
     uint8_t beep_enabled;       // 0=off, 1=on
     uint8_t reverse_enabled;    // 0=off, 1=on
     uint8_t serial_number[8];   // 8-byte serial number
+    uint8_t custom_name[8];
 } EAF_HandleTypeDef;
 
 /* warning, never change this values! */
@@ -114,7 +119,8 @@ typedef struct __attribute__((packed)) {
     uint8_t beep_enabled;       // 0=off, 1=on
     uint8_t reverse_enabled;    // 0=off, 1=on
     uint8_t serial_number[8];   // 8-byte serial number
-    uint8_t reserved[12];
+    uint8_t custom_name[8];
+    uint8_t reserved[4];
 } EAF_StorageTypeDef;
 
 #ifdef __cplusplus
@@ -151,13 +157,15 @@ uint8_t EAF_parse_report(uint8_t report_id, uint8_t report_type, uint8_t const* 
  * @brief Persist current EAF settings/state to storage
  * @retval 1 on success, 0 on error
  */
-uint8_t EAF_SaveSettings(void);
+uint8_t EAF_SaveSettings(bool withPosition);
 
 /**
  * @brief Update current position (call this in main loop)
  * @retval None
  */
 void EAF_UpdatePosition(void);
+
+bool EAF_isMoving(void);
 
 #ifdef __cplusplus
 }

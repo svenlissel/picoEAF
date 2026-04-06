@@ -9,6 +9,9 @@
 #include <string.h>
 #include "debug.h"
 #include "storage.h"
+#ifdef EAF_USE_EXTERNAL_STEPPER
+#include "stepper_TMC2209.h"
+#endif
 
 
 /* Private variables */
@@ -310,13 +313,16 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 // Apply settings
                 //heaf.backlash = pSettings->backlash;
                 //heaf.beep_enabled = beep;
-                //heaf.reverse_enabled = reverse;
+                heaf.reverse_enabled = reverse;
                 //heaf.max_position = max_steps;
                 heaf.target_position = targetPosition;
                 heaf.status = 0x01;  // start motor
                 
                 // Calculate steps to move (target - current)
                 int32_t delta_steps = (int32_t)targetPosition - (int32_t)heaf.current_position;
+                if (heaf.reverse_enabled) {
+                    delta_steps = -delta_steps;
+                }
                 
                 // Move stepper motor
                 Stepper_MoveSteps(&stepper_motor, delta_steps);
@@ -347,6 +353,7 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
                 else 
                 {
                     heaf.status = 0x00;  // stop motor only
+                    Stepper_Stop(&stepper_motor);
                 }
                 break;
                 
@@ -376,6 +383,9 @@ void EAF_UpdatePosition(void)
     
     // Update EAF position based on stepper movement
     int32_t stepper_delta = current_stepper_pos - last_stepper_pos;
+    if (heaf.reverse_enabled) {
+        stepper_delta = -stepper_delta;
+    }
     heaf.current_position += stepper_delta;
     last_stepper_pos = current_stepper_pos;
     

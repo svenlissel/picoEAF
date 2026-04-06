@@ -10,6 +10,19 @@
 #include "usb_hid.h"
 #include "debug.h"
 #include "eaf.h"
+#include "stepper_TMC2209.h"
+
+// ---------------------------------------------------------------------------
+// Stepper configuration (Pico GPIO numbers)
+// Adjust these pins to your board wiring.
+// ---------------------------------------------------------------------------
+static constexpr uint8_t STEPPER_PIN_EN   = 8;
+static constexpr int8_t  STEPPER_PIN_MS1  = 9;
+static constexpr int8_t  STEPPER_PIN_MS2  = 10;
+static constexpr uint8_t STEPPER_PIN_STEP = 14;
+static constexpr uint8_t STEPPER_PIN_DIR  = 15;
+
+Stepper_Handle_t stepper_motor;
 
 // ---------------------------------------------------------------------------
 // FreeRTOS task queue for inter-task communication
@@ -66,6 +79,21 @@ static void taskHeartbeat(void *pvParameters)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Task: stepper timing engine (1 ms tick)
+// ---------------------------------------------------------------------------
+static void taskStepper(void *pvParameters)
+{
+    (void)pvParameters;
+
+    for (;;)
+    {
+        Stepper_Process(&stepper_motor);
+        EAF_UpdatePosition();
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // setup() – runs once on core 0 inside the FreeRTOS idle task context
@@ -82,10 +110,35 @@ void setup()
     DBG_PRINTLN("Initializing USB HID device...");
     usb_hid_init();
 
+    // Configure and initialize TMC2209 stepper backend for EAF.
+    Stepper_Config_t stepper_cfg = {
+        .step_pin = STEPPER_PIN_STEP,
+        .dir_pin = STEPPER_PIN_DIR,
+        .en_pin = STEPPER_PIN_EN,
+        .ms1_pin = STEPPER_PIN_MS1,
+        .ms2_pin = STEPPER_PIN_MS2,
+        .full_steps_per_rev = 200,
+        .microstep_divider = TMC2209_MICROSTEP_8,
+        .rpm = 10,
+        .hold_when_idle = false,
+        .serial = nullptr,
+        .uart_address = 0,
+    };
+
+    if (Stepper_Init(&stepper_motor, &stepper_cfg) != STEPPER_OK)
+    {
+        DBG_PRINTLN("Stepper init failed");
+    }
+    else
+    {
+        DBG_PRINTLN("Stepper init OK");
+    }
+
 
     // Spawn FreeRTOS tasks
     xTaskCreate(taskBlink,     "Blink",     256,  NULL, 1, NULL);
     xTaskCreate(taskHeartbeat, "Heartbeat", 512,  NULL, 1, NULL);
+    xTaskCreate(taskStepper,   "Stepper",   512,  NULL, 2, NULL);
 
     DBG_PRINT("Device ready - waiting for USB host...\n");
 

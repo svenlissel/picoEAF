@@ -117,6 +117,8 @@ Stepper_Status_t Stepper_Init(Stepper_Handle_t *handle, Stepper_Config_t *config
     handle->direction = STEPPER_DIR_CW;
     handle->current_position = 0;
     handle->target_position = 0;
+    handle->logical_position = 0;
+    handle->backlash_pending = 0;
     handle->tick_counter = 0;
 
     TMC2209_UpdateStepPeriod(handle);
@@ -165,14 +167,24 @@ void Stepper_SetSpeed(Stepper_Handle_t *handle, uint16_t rpm)
     TMC2209_UpdateStepPeriod(handle);
 }
 
-void Stepper_MoveSteps(Stepper_Handle_t *handle, int32_t steps)
+void Stepper_MoveSteps(Stepper_Handle_t *handle, int32_t steps, uint16_t backlash_steps)
 {
     if (steps == 0) {
         return;
     }
 
-    handle->target_position = handle->current_position + steps;
-    handle->direction = (steps > 0) ? STEPPER_DIR_CW : STEPPER_DIR_CCW;
+    Stepper_Direction_t next_direction = (steps > 0) ? STEPPER_DIR_CW : STEPPER_DIR_CCW;
+    int32_t effective_steps = steps;
+
+    if (backlash_steps > 0 && next_direction != handle->direction) {
+        handle->backlash_pending = backlash_steps;
+        effective_steps += (steps > 0) ? (int32_t)backlash_steps : -(int32_t)backlash_steps;
+    } else {
+        handle->backlash_pending = 0;
+    }
+
+    handle->target_position = handle->current_position + effective_steps;
+    handle->direction = next_direction;
     TMC2209_SetDirection(handle, handle->direction);
 
     handle->tick_counter = handle->step_period_ticks;
@@ -182,7 +194,7 @@ void Stepper_MoveSteps(Stepper_Handle_t *handle, int32_t steps)
 
 void Stepper_MoveTo(Stepper_Handle_t *handle, int32_t position)
 {
-    Stepper_MoveSteps(handle, position - handle->current_position);
+    Stepper_MoveSteps(handle, position - handle->logical_position, 0);
 }
 
 bool Stepper_Process(Stepper_Handle_t *handle)
@@ -214,6 +226,13 @@ bool Stepper_Process(Stepper_Handle_t *handle)
 
     TMC2209_DoStepPulse(handle);
     handle->current_position += dir;
+
+    if (handle->backlash_pending > 0) {
+        handle->backlash_pending--;
+    } else {
+        handle->logical_position += dir;
+    }
+
     return true;
 }
 
@@ -233,13 +252,15 @@ void Stepper_Release(Stepper_Handle_t *handle)
 
 int32_t Stepper_GetPosition(Stepper_Handle_t *handle)
 {
-    return handle->current_position;
+    return handle->logical_position;
 }
 
 void Stepper_ResetPosition(Stepper_Handle_t *handle)
 {
     handle->current_position = 0;
     handle->target_position = 0;
+    handle->logical_position = 0;
+    handle->backlash_pending = 0;
 }
 
 bool Stepper_IsMoving(Stepper_Handle_t *handle)

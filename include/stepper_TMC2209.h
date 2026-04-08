@@ -91,8 +91,10 @@ typedef struct {
     Stepper_State_t state;
     Stepper_Direction_t direction;
 
-    int32_t current_position;
-    int32_t target_position;
+    int32_t current_position;     // Raw motor step position (includes backlash take-up)
+    int32_t target_position;      // Raw motor target position
+    int32_t logical_position;     // Position exposed to application (excludes backlash take-up)
+    uint16_t backlash_pending;    // Remaining compensation steps not reflected in logical_position
 
     uint32_t step_period_ticks;
     uint32_t tick_counter;
@@ -100,7 +102,7 @@ typedef struct {
 
 Stepper_Status_t Stepper_Init(Stepper_Handle_t *handle, Stepper_Config_t *config);
 void Stepper_SetSpeed(Stepper_Handle_t *handle, uint16_t rpm);
-void Stepper_MoveSteps(Stepper_Handle_t *handle, int32_t steps);
+void Stepper_MoveSteps(Stepper_Handle_t *handle, int32_t steps, uint16_t backlash_steps);
 void Stepper_MoveTo(Stepper_Handle_t *handle, int32_t position);
 bool Stepper_Process(Stepper_Handle_t *handle);
 void Stepper_Stop(Stepper_Handle_t *handle);

@@ -167,6 +167,8 @@ void EAF_UpdatePosition(void);
 
 bool EAF_isMoving(void);
 
+void EAF_SetTemperatureCentiDeg(int16_t temperature_centi_deg);
+
 #ifdef __cplusplus
 }
 #endif

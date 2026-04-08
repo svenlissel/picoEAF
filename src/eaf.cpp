@@ -208,9 +208,10 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
     {
     switch (cmd) {
         case EAF_CMD_GET_POSITION: {
-            //DBG_PRINTF("[EAF] -> GET_POSITION: %lu, Status: 0x%02X\r\n", 
-             //           heaf.current_position, heaf.status);
-            
+#if 0
+            DBG_PRINTF("[EAF] -> GET_POSITION: %lu, Status: 0x%02X\r\n", 
+                        heaf.current_position, heaf.status);
+#endif
             // Response: 12 bytes payload (16 total with 4-byte header 01 7E 5A 03)
             // Position: 24-bit Big-Endian at bytes 3-5
             // Temperature: Big-Endian uint16 at bytes 7-8 (encode as 30000 + temp*10)
@@ -401,7 +402,9 @@ static void EAF_ProcessCommand(uint8_t type, uint8_t cmd, uint8_t const* params,
         }
         DBG_PRINTF("\r\n");
     }
-
+// update:
+//[EAF] WARNING: Unknowntype command type15, cmd 4
+//[EAF] RX Report: 00 00 00 00 00 00 00 00 00 00 00 00 
 
 }
 
@@ -434,6 +437,11 @@ void EAF_UpdatePosition(void)
         }
         heaf.status = 0x00;  // Idle
     }
+}
+
+void EAF_SetTemperatureCentiDeg(int16_t temperature_centi_deg)
+{
+    heaf.temperature = temperature_centi_deg;
 }
 
 bool EAF_isMoving(void)

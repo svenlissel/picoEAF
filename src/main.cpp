@@ -82,13 +82,36 @@ static void taskPositionSaver(void *pvParameters)
 {
     (void)pvParameters;
 
+    const TickType_t kSaveAfterIdleTicks = pdMS_TO_TICKS(60 * 1000);
+    const TickType_t kPollTicks = pdMS_TO_TICKS(500);
+
+    TickType_t last_motion_tick = xTaskGetTickCount();
+    bool was_moving = EAF_isMoving();
+    bool saved_for_current_idle = false;
+
     for (;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(60*1000));
-        if(false == EAF_isMoving())
-        {
-            EAF_SaveSettings(true);
+        bool moving = EAF_isMoving();
+        TickType_t now = xTaskGetTickCount();
+
+        if (moving) {
+            last_motion_tick = now;
+            saved_for_current_idle = false;
+        } else {
+            // Detect edge: moving -> idle, start idle timer from stop moment.
+            if (was_moving) {
+                last_motion_tick = now;
+                saved_for_current_idle = false;
+            }
+
+            if (!saved_for_current_idle && ((now - last_motion_tick) >= kSaveAfterIdleTicks)) {
+                EAF_SaveSettings(true);
+                saved_for_current_idle = true;
+            }
         }
+
+        was_moving = moving;
+        vTaskDelay(kPollTicks);
     }
 }
 
